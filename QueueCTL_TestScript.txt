@@ -1,0 +1,48 @@
+QueueCTL Full Test Script
+1)Basic Job Completes Successfully
+node src/cli/index.js clear
+node src/cli/index.js enqueue '{\"id\":\"job1\",\"command\":\"echo Hello World\"}'
+node src/cli/index.js worker --start --count 1
+node src/cli/index.js list --state completed
+
+
+Expected: Job completes and shows in completed list.
+
+2)Failed Job Retries + DLQ
+node src/cli/index.js enqueue '{\"id\":\"job-fail\",\"command\":\"exit 1\"}'
+node src/cli/index.js worker --start --count 1
+node src/cli/index.js dlq list
+
+
+Expected: Fails 3 times, moves to DLQ.
+
+3) Multiple Workers, No Overlap
+node src/cli/index.js clear
+node src/cli/index.js enqueue '{\"id\":\"job1\",\"command\":\"echo job1\"}'
+node src/cli/index.js enqueue '{\"id\":\"job2\",\"command\":\"echo job2\"}'
+node src/cli/index.js enqueue '{\"id\":\"job3\",\"command\":\"echo job3\"}'
+node src/cli/index.js enqueue '{\"id\":\"job4\",\"command\":\"echo job4\"}'
+node src/cli/index.js enqueue '{\"id\":\"job5\",\"command\":\"echo job5\"}'
+node src/cli/index.js worker --start --count 3
+
+
+Expected: All jobs run once, processed by different workers (no duplicates).
+
+4) Invalid Command Fails Gracefully
+node src/cli/index.js enqueue '{\"id\":\"job-invalid\",\"command\":\"notarealcommand\"}'
+node src/cli/index.js worker --start --count 1
+node src/cli/index.js dlq list
+
+
+Expected: Job fails (exit 127) and moves to DLQ safely.
+
+5)Job Data Persists After Restart
+node src/cli/index.js enqueue '{\"id\":\"persistent-job\",\"command\":\"echo Persistent\"}'
+node src/cli/index.js list   # Check job is queued
+
+# Close PowerShell or stop Node
+# Then reopen PowerShell and re-run:
+node src/cli/index.js list   # Job should still appear (proves persistence)
+
+
+Expected: Job remains in DB after restart.
