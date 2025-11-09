@@ -1,53 +1,41 @@
 #!/usr/bin/env node
 import { spawn } from 'child_process';
-
 import { fetchAndLockJob, completeJob, failJob, resetJobForRetry } from './jobManager.js';
-import { getDB, initDB } from '../db/database.js';
-
-
+import { initDB } from '../db/database.js';
+import { getConfig } from './config.js';
 
 await initDB();
 
 let isRunning = false;
 let workerPromises = [];
 
-export async function startWorkers(count = 1, pollInterval = 1500, jobTimeout = 0) {
-  // 🧩 Step 1: Override defaults with environment variables if available
-  const resolvedCount = process.env.WORKER_COUNT
-    ? Number(process.env.WORKER_COUNT)
-    : count;
+export async function startWorkers() {
+  const config = await getConfig();
 
-  const resolvedPollInterval = process.env.QUEUE_POLL_INTERVAL
-    ? Number(process.env.QUEUE_POLL_INTERVAL)
-    : pollInterval;
-
-  const resolvedJobTimeout = process.env.JOB_TIMEOUT
-    ? Number(process.env.JOB_TIMEOUT)
-    : jobTimeout;
+  const resolvedCount = Number(process.env.WORKER_COUNT ?? config.workerCount ?? 1);
+  const resolvedPollInterval = Number(process.env.QUEUE_POLL_INTERVAL ?? config.pollInterval ?? 1500);
+  const resolvedJobTimeout = Number(process.env.JOB_TIMEOUT ?? config.jobTimeout ?? 0);
+  const errorRetryDelay = Number(process.env.ERROR_RETRY_DELAY ?? 2000);
 
   if (isRunning) {
-    console.log(' Workers already running');
+    console.log('Workers already running');
     return;
   }
 
   isRunning = true;
 
-  // 🧩 Step 2: Show configuration for clarity
   console.log(
-    ` Starting ${resolvedCount} worker(s)... (pollInterval=${resolvedPollInterval}ms, jobTimeout=${resolvedJobTimeout}s)`
+    `Starting ${resolvedCount} worker(s)... (pollInterval=${resolvedPollInterval}ms, jobTimeout=${resolvedJobTimeout}ms, errorRetryDelay=${errorRetryDelay}ms)`
   );
 
-  // 🧩 Step 3: Reset stuck jobs before starting
   await resetStuckJobs();
 
-  // 🧩 Step 4: Start worker loops
   for (let i = 0; i < resolvedCount; i++) {
     const workerId = `worker-${i + 1}`;
-    const workerPromise = runWorkerLoop(workerId, resolvedPollInterval, resolvedJobTimeout);
+    const workerPromise = runWorkerLoop(workerId, resolvedPollInterval, resolvedJobTimeout, errorRetryDelay);
     workerPromises.push(workerPromise);
   }
 
-  // 🧩 Step 5: Graceful shutdown
   process.once('SIGINT', stopWorkers);
   process.once('SIGTERM', stopWorkers);
 }
@@ -64,8 +52,8 @@ async function resetStuckJobs() {
   }
 }
 
-async function runWorkerLoop(workerId, pollInterval, jobTimeout) {
-  console.log(` Worker started: ${workerId}`);
+async function runWorkerLoop(workerId, pollInterval, jobTimeout, errorRetryDelay) {
+  console.log(`Worker started: ${workerId}`);
 
   while (isRunning) {
     try {
@@ -76,15 +64,15 @@ async function runWorkerLoop(workerId, pollInterval, jobTimeout) {
         continue;
       }
 
-      console.log(` [${workerId}] Executing job ${job.id}: ${job.command}`);
+      console.log(`[${workerId}] Executing job ${job.id}: ${job.command}`);
       await executeJob(job, workerId, jobTimeout);
     } catch (err) {
-      console.error(` [${workerId}] error:`, err?.message ?? err);
-      await sleep(2000);
+      console.error(`[${workerId}] Error:`, err?.message ?? err);
+      await sleep(errorRetryDelay);
     }
   }
 
-  console.log(` Worker stopped: ${workerId}`);
+  console.log(`Worker stopped: ${workerId}`);
 }
 
 async function executeJob(job, workerId, jobTimeout = 0) {
@@ -98,8 +86,8 @@ async function executeJob(job, workerId, jobTimeout = 0) {
       if (!finished) {
         finished = true;
         child.kill('SIGTERM');
-        output += `\n Job timed out after ${jobTimeout}ms`;
-        console.log(` [${workerId}] Job ${job.id} timed out`);
+        output += `\nJob timed out after ${jobTimeout}ms`;
+        console.log(`[${workerId}] Job ${job.id} timed out`);
         await failJob(job.id, output);
         resolve();
       }
@@ -113,7 +101,7 @@ async function executeJob(job, workerId, jobTimeout = 0) {
       finished = true;
       if (timer) clearTimeout(timer);
       output += `\nspawn error: ${err.message}`;
-      console.log(` [${workerId}] spawn error for job ${job.id}: ${err.message}`);
+      console.log(`[${workerId}] Spawn error for job ${job.id}: ${err.message}`);
       await failJob(job.id, output);
       resolve();
     });
@@ -125,10 +113,10 @@ async function executeJob(job, workerId, jobTimeout = 0) {
       const duration = ((Date.now() - startTs) / 1000).toFixed(2);
 
       if (code === 0) {
-        console.log(` [${workerId}] Job ${job.id} completed (${duration}s)`);
+        console.log(`[${workerId}] Job ${job.id} completed (${duration}s)`);
         await completeJob(job.id, output);
       } else {
-        console.log(` [${workerId}] Job ${job.id} failed (exit ${code})`);
+        console.log(`[${workerId}] Job ${job.id} failed (exit ${code})`);
         await failJob(job.id, output || `Exit code ${code}`);
       }
       resolve();
@@ -138,20 +126,20 @@ async function executeJob(job, workerId, jobTimeout = 0) {
 
 export async function stopWorkers() {
   if (!isRunning) {
-    console.log(' Workers are not running');
+    console.log('Workers are not running');
     return;
   }
 
-  console.log(' Stopping workers... waiting for active jobs to finish');
+  console.log('Stopping workers... waiting for active jobs to finish');
   isRunning = false;
 
   try {
     await Promise.all(workerPromises);
   } catch (err) {
-    console.error(' Error stopping workers:', err);
+    console.error('Error stopping workers:', err);
   } finally {
     workerPromises = [];
-    console.log(' All workers stopped');
+    console.log('All workers stopped');
     process.exit(0);
   }
 }

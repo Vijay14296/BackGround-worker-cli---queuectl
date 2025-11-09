@@ -66,7 +66,7 @@ program
   .command('clear')
   .description('Clear all jobs from the queue')
   .action(async () => {
-    await clearAllJobs(); // implement in jobManager.js
+    await clearAllJobs(); 
     console.log('🧹 All jobs cleared.');
   });
 
@@ -108,7 +108,7 @@ config
     });
 
 
-// Reset a single job by ID or all processing jobs
+
 program
   .command('reset')
   .description('Reset jobs stuck in processing or by job ID')

@@ -1,25 +1,25 @@
-// src/core/jobManager.js
 import { v4 as uuidv4 } from 'uuid';
+import dotenv from 'dotenv';
 import { getDB, initDB, dbMutex } from '../db/database.js';
+
+dotenv.config();
 await initDB();
 
-function isoNow(){ return new Date().toISOString(); }
+function isoNow() {
+  return new Date().toISOString();
+}
 
-
-
-// 🧾 List jobs by state or all
-
+// Read defaults from environment variables
+const MAX_RETRIES = parseInt(process.env.MAX_RETRIES, 10) || 3;
+const CLAIM_TIMEOUT = parseInt(process.env.CLAIM_TIMEOUT, 10) || 300;
 
 export async function listJobs(state) {
   try {
     const db = getDB();
-    await db.read(); // make sure we have the latest data
+    await db.read();
 
-    // Filter jobs if a state is provided, otherwise return all
     let jobList = db.data.jobs || [];
-    if (state) {
-      jobList = jobList.filter(job => job.state === state);
-    }
+    if (state) jobList = jobList.filter(job => job.state === state);
 
     if (jobList.length === 0) {
       console.log(state ? `No jobs in state: ${state}` : 'No jobs found.');
@@ -38,20 +38,19 @@ export async function listJobs(state) {
   }
 }
 
-
-
 export async function enqueueJob(jobData) {
   if (!jobData?.command) throw new Error('enqueueJob requires jobData.command');
   const db = getDB();
 
   return await dbMutex.runExclusive(async () => {
     await db.read();
+
     const newJob = {
       id: jobData.id || uuidv4(),
       command: jobData.command,
       state: 'pending',
       attempts: 0,
-      max_retries: jobData.max_retries ?? (db.data.config?.maxRetries ?? 3),
+      max_retries: jobData.max_retries ?? (db.data.config?.maxRetries ?? MAX_RETRIES),
       created_at: isoNow(),
       updated_at: isoNow(),
       next_run_at: null,
@@ -60,6 +59,7 @@ export async function enqueueJob(jobData) {
       locked_at: null,
       output: null,
     };
+
     db.data.jobs = db.data.jobs || [];
     db.data.jobs.push(newJob);
     await db.write();
@@ -67,13 +67,18 @@ export async function enqueueJob(jobData) {
     return newJob;
   });
 }
+
 export async function getStatus() {
-  const { jobs } = await import('./database.js');
-  const total = await jobs.countDocuments({});
-  const pending = await jobs.countDocuments({ state: 'pending' });
-  const processing = await jobs.countDocuments({ state: 'processing' });
-  const completed = await jobs.countDocuments({ state: 'completed' });
-  const failed = await jobs.countDocuments({ state: 'failed' });
+  const db = getDB();
+  await db.read();
+  const jobs = db.data.jobs || [];
+
+  const total = jobs.length;
+  const pending = jobs.filter(j => j.state === 'pending').length;
+  const processing = jobs.filter(j => j.state === 'processing').length;
+  const completed = jobs.filter(j => j.state === 'completed').length;
+  const failed = jobs.filter(j => j.state === 'failed').length;
+  const dead = jobs.filter(j => j.state === 'dead').length;
 
   console.log(' Queue Status:');
   console.log(`Total Jobs: ${total}`);
@@ -81,31 +86,25 @@ export async function getStatus() {
   console.log(`Processing: ${processing}`);
   console.log(`Completed: ${completed}`);
   console.log(`Failed: ${failed}`);
+  console.log(`Dead: ${dead}`);
 }
 
-/**
- * fetchAndLockJob(workerId, claimTimeoutSeconds)
- * - Selects the oldest pending job
- * - If none pending, will try to claim a stale processing/locked job older than claimTimeoutSeconds
- */
 export async function fetchAndLockJob(workerId, claimTimeoutSeconds = null) {
   const db = getDB();
   return await dbMutex.runExclusive(async () => {
     await db.read();
     db.data.jobs = db.data.jobs || [];
     const now = Date.now();
-    const claimTimeout = claimTimeoutSeconds ?? (db.data.config?.claimTimeout ?? 300);
+    const claimTimeout = claimTimeoutSeconds ?? (db.data.config?.claimTimeout ?? CLAIM_TIMEOUT);
 
-    // 1) try to find oldest pending job
     let job = db.data.jobs.find(j => j.state === 'pending' && !j.locked);
     if (!job) {
-      // 2) try to steal stale processing/locked job older than claimTimeout
-      job = db.data.jobs.find(j => j.state === 'processing' && j.locked_at && ((now - new Date(j.locked_at).getTime()) / 1000) > claimTimeout);
+      job = db.data.jobs.find(j => j.state === 'processing' && j.locked_at &&
+        ((now - new Date(j.locked_at).getTime()) / 1000) > claimTimeout);
     }
 
     if (!job) return null;
 
-    // claim it
     job.state = 'processing';
     job.locked = true;
     job.locked_by = workerId;
@@ -143,8 +142,9 @@ export async function failJob(jobId, output = '') {
     job.output = output;
     job.updated_at = isoNow();
 
-    // Move to DLQ when attempts >= max_retries
-    if (job.attempts >= (job.max_retries ?? (db.data.config?.maxRetries ?? 3))) {
+    const maxRetries = job.max_retries ?? (db.data.config?.maxRetries ?? MAX_RETRIES);
+
+    if (job.attempts >= maxRetries) {
       job.state = 'dead';
       job.locked = false;
       job.locked_by = null;
@@ -153,7 +153,6 @@ export async function failJob(jobId, output = '') {
       db.data.dlq.push({ ...job, dead_at: isoNow() });
       console.log(` Job moved to DLQ: ${job.id}`);
     } else {
-      // requeue
       job.state = 'pending';
       job.locked = false;
       job.locked_by = null;
@@ -184,7 +183,7 @@ export async function unlockStaleJobs(timeoutSeconds = null) {
   const now = Date.now();
   return await dbMutex.runExclusive(async () => {
     await db.read();
-    const timeout = timeoutSeconds ?? (db.data.config?.claimTimeout ?? 300);
+    const timeout = timeoutSeconds ?? (db.data.config?.claimTimeout ?? CLAIM_TIMEOUT);
     let unlockedCount = 0;
     db.data.jobs = db.data.jobs || [];
     for (let job of db.data.jobs) {
@@ -212,5 +211,3 @@ export async function clearAllJobs() {
     await db.write();
   });
 }
-
-/* listJobs/getStatus kept same as before... */
