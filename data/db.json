@@ -1,5 +1,20 @@
 {
-  "jobs": [],
+  "jobs": [
+    {
+      "id": "job1",
+      "command": "sleep 600",
+      "state": "pending",
+      "attempts": 0,
+      "max_retries": 3,
+      "created_at": "2025-11-22T09:26:07.210Z",
+      "updated_at": "2025-11-22T09:26:07.211Z",
+      "next_run_at": null,
+      "locked": false,
+      "locked_by": null,
+      "locked_at": null,
+      "output": null
+    }
+  ],
   "dlq": [],
   "config": {
     "workerCount": 1,

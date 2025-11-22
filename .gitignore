@@ -20,6 +20,7 @@ Thumbs.db
 .idea/
 data/jobs.json
 data/dlq.json
+data/db.json
 logs/
 *.log
 test-results/
