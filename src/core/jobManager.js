@@ -9,7 +9,7 @@ function isoNow() {
   return new Date().toISOString();
 }
 
-// Read defaults from environment variables
+
 const MAX_RETRIES = parseInt(process.env.MAX_RETRIES, 10) || 3;
 const CLAIM_TIMEOUT = parseInt(process.env.CLAIM_TIMEOUT, 10) || 300;
 
@@ -19,7 +19,13 @@ export async function listJobs(state) {
     await db.read();
 
     let jobList = db.data.jobs || [];
-    if (state) jobList = jobList.filter(job => job.state === state);
+
+    // Include DLQ jobs if asking for 'dead'
+    if (state === 'dead') {
+      jobList = db.data.dlq || [];
+    } else if (state) {
+      jobList = jobList.filter(job => job.state === state);
+    }
 
     if (jobList.length === 0) {
       console.log(state ? `No jobs in state: ${state}` : 'No jobs found.');
@@ -28,7 +34,7 @@ export async function listJobs(state) {
 
     console.log(`\n Jobs${state ? ` (${state})` : ''}:`);
     jobList.forEach(job => {
-      console.log(`- ID: ${job.id}, Command: ${job.command}, State: ${job.state}`);
+      console.log(`- ID: ${job.id}, Command: ${job.command}, State: ${state === 'dead' ? 'dead' : job.state}`);
     });
 
     return jobList;
@@ -71,14 +77,16 @@ export async function enqueueJob(jobData) {
 export async function getStatus() {
   const db = getDB();
   await db.read();
-  const jobs = db.data.jobs || [];
 
-  const total = jobs.length;
+  const jobs = db.data.jobs || [];
+  const dlq = db.data.dlq || [];
+
+  const total = jobs.length + dlq.length; // all jobs including DLQ
   const pending = jobs.filter(j => j.state === 'pending').length;
   const processing = jobs.filter(j => j.state === 'processing').length;
   const completed = jobs.filter(j => j.state === 'completed').length;
   const failed = jobs.filter(j => j.state === 'failed').length;
-  const dead = jobs.filter(j => j.state === 'dead').length;
+  const dead = dlq.length; // DLQ jobs are "dead"
 
   console.log(' Queue Status:');
   console.log(`Total Jobs: ${total}`);
@@ -88,6 +96,7 @@ export async function getStatus() {
   console.log(`Failed: ${failed}`);
   console.log(`Dead: ${dead}`);
 }
+
 
 export async function fetchAndLockJob(workerId, claimTimeoutSeconds = null) {
   const db = getDB();
@@ -145,20 +154,27 @@ export async function failJob(jobId, output = '') {
     const maxRetries = job.max_retries ?? (db.data.config?.maxRetries ?? MAX_RETRIES);
 
     if (job.attempts >= maxRetries) {
-      job.state = 'dead';
-      job.locked = false;
-      job.locked_by = null;
-      job.locked_at = null;
-      db.data.dlq = db.data.dlq || [];
-      db.data.dlq.push({ ...job, dead_at: isoNow() });
-      console.log(` Job moved to DLQ: ${job.id}`);
-    } else {
-      job.state = 'pending';
-      job.locked = false;
-      job.locked_by = null;
-      job.locked_at = null;
-    }
-    await db.write();
+        // Remove the job from jobs array
+        const idx = db.data.jobs.findIndex(j => j.id === job.id);
+        if (idx !== -1) db.data.jobs.splice(idx, 1);
+
+        job.state = 'dead';
+        job.locked = false;
+        job.locked_by = null;
+        job.locked_at = null;
+
+        db.data.dlq = db.data.dlq || [];
+        db.data.dlq.push({ ...job, dead_at: isoNow() });
+
+        console.log(` Job moved to DLQ: ${job.id}`);
+      } else {
+        job.state = 'pending';
+        job.locked = false;
+        job.locked_by = null;
+        job.locked_at = null;
+      }
+      await db.write();
+
   });
 }
 

@@ -67,7 +67,7 @@ program
   .description('Clear all jobs from the queue')
   .action(async () => {
     await clearAllJobs(); 
-    console.log('🧹 All jobs cleared.');
+    console.log(' All jobs cleared.');
   });
 
 program

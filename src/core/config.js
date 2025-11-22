@@ -1,5 +1,6 @@
 import { getDB, initDB } from '../db/database.js';
-import 'dotenv/config'; 
+import dotenv from 'dotenv'
+dotenv.config();
 
 await initDB();
 
@@ -7,7 +8,7 @@ const envDefaults = {
   workerCount: process.env.WORKER_COUNT ? Number(process.env.WORKER_COUNT) : 1,
   pollInterval: process.env.POLL_INTERVAL ? Number(process.env.POLL_INTERVAL) : 1500,
   jobTimeout: process.env.JOB_TIMEOUT ? Number(process.env.JOB_TIMEOUT) : 0,
-  dbPath: process.env.DB_PATH || './db/db.json',
+  dbPath: process.env.QUEUECTL_DB_FILE || './data/db.json',
 };
 
 
@@ -57,7 +58,7 @@ export async function setConfig(keyOrObj, maybeValue) {
   }
 
   await db.write();
-  console.log('✅ Config updated:', db.data.config);
+  console.log(' Config updated:', db.data.config);
   return db.data.config;
 }
 

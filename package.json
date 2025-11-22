@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "main": "src/cli/index.js",
+  "bin": {
+    "queuectl": "./src/cli/index.js"
+  },
   "scripts": {
     "start": "node src/server/app.js",
     "cli": "node src/cli/index.js",

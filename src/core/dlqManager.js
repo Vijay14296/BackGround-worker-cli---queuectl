@@ -32,8 +32,10 @@ export async function retryDLQJob(jobId) {
       locked: false,
       locked_by: null,
       locked_at: null,
+      dead_at: null,        // clear dead marker
       updated_at: isoNow(),
     };
+
     db.data.jobs.push(requeued);
     await db.write();
     console.log(` DLQ job requeued: ${jobId}`);

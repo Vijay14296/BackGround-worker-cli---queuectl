@@ -9,10 +9,10 @@ await initDB();
 let isRunning = false;
 let workerPromises = [];
 
-export async function startWorkers() {
+export async function startWorkers(countfromCLI= null) {
   const config = await getConfig();
 
-  const resolvedCount = Number(process.env.WORKER_COUNT ?? config.workerCount ?? 1);
+  const resolvedCount = Number(countfromCLI??process.env.WORKER_COUNT ?? config.workerCount ?? 1);
   const resolvedPollInterval = Number(process.env.QUEUE_POLL_INTERVAL ?? config.pollInterval ?? 1500);
   const resolvedJobTimeout = Number(process.env.JOB_TIMEOUT ?? config.jobTimeout ?? 0);
   const errorRetryDelay = Number(process.env.ERROR_RETRY_DELAY ?? 2000);

@@ -1,26 +1,11 @@
 {
-  "jobs": [
-    {
-      "id": "job1",
-      "command": "echo Hello World",
-      "state": "completed",
-      "attempts": 0,
-      "max_retries": 3,
-      "created_at": "2025-11-09T19:00:49.438Z",
-      "updated_at": "2025-11-09T19:00:55.922Z",
-      "next_run_at": null,
-      "locked": false,
-      "locked_by": null,
-      "locked_at": null,
-      "output": "Hello World\r\n"
-    }
-  ],
+  "jobs": [],
   "dlq": [],
   "config": {
-    "workerCount": 2,
+    "workerCount": 1,
     "pollInterval": 1500,
     "jobTimeout": 60000,
-    "dbPath": "./db/db.json",
+    "dbPath": "./data/db.json",
     "maxRetries": 3,
     "backoffBase": 2,
     "claimTimeout": 300
